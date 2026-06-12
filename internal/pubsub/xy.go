@@ -3,6 +3,7 @@ package pubsub
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 
 	ampq "github.com/rabbitmq/amqp091-go"
@@ -64,4 +65,43 @@ func DeclareAndBind(
 		log.Fatal(err)
 	}
 	return newChannel, newQueue, nil
+}
+
+func SubscribeJSON[T any](
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	queueType SimpleQueueType, // an enum to represent "durable" or "transient"
+	handler func(T),
+) error {
+	fmt.Println("SubscribeJSON called")
+	channel, queue, err := DeclareAndBind(conn, exchange, queueName, key, queueType)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("DeclareAndBind succeeded, calling Consume...")
+	m, err := channel.Consume(queue.Name, "", false, false, false, false, nil)
+	fmt.Println("Consume succeeded, starting goroutine...")
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("consumer started")
+
+	go func() {
+		for message := range m {
+			var msg T
+			err = json.Unmarshal(message.Body, &msg)
+			if err != nil {
+				log.Fatal(err)
+			}
+			handler(msg)
+			err = message.Ack(false)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+		fmt.Println("consumer exiting goroutine")
+	}()
+	return nil
 }

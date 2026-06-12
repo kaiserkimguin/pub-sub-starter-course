@@ -25,6 +25,15 @@ func main() {
 	}
 
 	newChannel, err := newConntection.Channel()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	logChannel, logQueue, err := pubsub.DeclareAndBind(newConntection, routing.ExchangePerilTopic, "game_logs", "game_logs.*", pubsub.Durable)
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("Successfully set up queue:\n %v, on channel\n: %v\n", logChannel, logQueue)
 
 	defer newConntection.Close()
 
