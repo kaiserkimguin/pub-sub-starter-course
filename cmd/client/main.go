@@ -41,12 +41,22 @@ func main() {
 	queueNameMoves := routing.ArmyMovesPrefix + "." + userName
 	moveKey := routing.ArmyMovesPrefix + ".*"
 	moveExchange := routing.ExchangePerilTopic
-	fmt.Println("queue:", queueNameMoves)
-	fmt.Println("binding key:", moveKey)
-	err = pubsub.SubscribeJSON(newConnection, moveExchange, queueNameMoves, moveKey, pubsub.Transient, handlerMove(gameState))
+	moveChannel, err := newConnection.Channel()
 	if err != nil {
 		log.Fatal(err)
 	}
+	defer moveChannel.Close()
+	fmt.Println("queue:", queueNameMoves)
+	fmt.Println("binding key:", moveKey)
+	err = pubsub.SubscribeJSON(newConnection, moveExchange, queueNameMoves, moveKey, pubsub.Transient, handlerMove(gameState, moveChannel))
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	queueNameWar := "war"
+	warKey := routing.WarRecognitionsPrefix + "." + userName
+	warExchange := moveExchange
+	err = pubsub.SubscribeJSON(newConnection, warExchange, queueNameWar, warKey, pubsub.Durable, handlerConsumeWarMsg(gameState))
 	fmt.Println("Move queue declared and bound")
 
 	reader := bufio.NewReader(os.Stdin)

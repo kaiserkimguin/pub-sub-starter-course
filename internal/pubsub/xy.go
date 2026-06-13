@@ -55,7 +55,9 @@ func DeclareAndBind(
 		autoDelete = true
 		exclusive = true
 	}
-	newQueue, err := newChannel.QueueDeclare(queueName, durable, autoDelete, exclusive, false, nil)
+	newQueue, err := newChannel.QueueDeclare(queueName, durable, autoDelete, exclusive, false, ampq.Table{
+		"x-dead-letter-exchange": "peril_dlx",
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -67,13 +69,21 @@ func DeclareAndBind(
 	return newChannel, newQueue, nil
 }
 
+type Acktype int
+
+const (
+	Ack Acktype = iota
+	NackRequeue
+	NackDiscard
+)
+
 func SubscribeJSON[T any](
 	conn *amqp.Connection,
 	exchange,
 	queueName,
 	key string,
 	queueType SimpleQueueType, // an enum to represent "durable" or "transient"
-	handler func(T),
+	handler func(T) Acktype,
 ) error {
 	fmt.Println("SubscribeJSON called")
 	channel, queue, err := DeclareAndBind(conn, exchange, queueName, key, queueType)
@@ -95,10 +105,26 @@ func SubscribeJSON[T any](
 			if err != nil {
 				log.Fatal(err)
 			}
-			handler(msg)
-			err = message.Ack(false)
-			if err != nil {
-				log.Fatal(err)
+			acktype := handler(msg)
+			switch acktype {
+			case Ack:
+				err = message.Ack(false)
+				if err != nil {
+					log.Fatal(err)
+				}
+				fmt.Println("Message processed successfully")
+			case NackRequeue:
+				err = message.Nack(false, true)
+				if err != nil {
+					log.Fatal(err)
+				}
+				fmt.Println("Message not processed successfully, should be requeued")
+			case NackDiscard:
+				err = message.Nack(false, false)
+				if err != nil {
+					log.Fatal(err)
+				}
+				fmt.Println("Message not processed successfully, should be discarded")
 			}
 		}
 		fmt.Println("consumer exiting goroutine")
