@@ -25,7 +25,7 @@ func PublishJSON[T any](ch *ampq.Channel, exchange, key string, val T) error {
 	}
 	err = ch.PublishWithContext(context.Background(), exchange, key, false, false, msg)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	return nil
 }
@@ -35,7 +35,7 @@ func PublishGob[T any](ch *amqp.Channel, exchange, key string, val T) error {
 	enc := gob.NewEncoder(&gobBytes)
 	err := enc.Encode(val)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	msg := amqp.Publishing{
@@ -47,7 +47,7 @@ func PublishGob[T any](ch *amqp.Channel, exchange, key string, val T) error {
 
 	err = ch.PublishWithContext(context.Background(), exchange, key, false, false, msg)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	return nil
 }
@@ -106,47 +106,99 @@ func SubscribeJSON[T any](
 	exchange,
 	queueName,
 	key string,
-	queueType SimpleQueueType, // an enum to represent "durable" or "transient"
+	simpleQueueType SimpleQueueType,
 	handler func(T) Acktype,
 ) error {
-	fmt.Println("SubscribeJSON called")
-	channel, queue, err := DeclareAndBind(conn, exchange, queueName, key, queueType)
-	if err != nil {
-		log.Fatal(err)
+	jsonDecoder := func(message []byte) (T, error) {
+		var msg T
+		err := json.Unmarshal(message, &msg)
+		if err != nil {
+			return msg, err
+		}
+		return msg, nil
 	}
-	fmt.Println("DeclareAndBind succeeded, calling Consume...")
+	err := subscribe(conn, exchange, queueName, key, simpleQueueType, handler, jsonDecoder)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func SubscribeGob[T any](
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	simpleQueueType SimpleQueueType,
+	handler func(T) Acktype,
+) error {
+	gobDecoder := func(message []byte) (T, error) {
+		messageReader := bytes.NewBuffer(message)
+		decoder := gob.NewDecoder(messageReader)
+		var msg T
+		err := decoder.Decode(&msg)
+		if err != nil {
+			return msg, err
+		}
+		return msg, nil
+	}
+	err := subscribe(conn, exchange, queueName, key, simpleQueueType, handler, gobDecoder)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func subscribe[T any](
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	simpleQueueType SimpleQueueType,
+	handler func(T) Acktype,
+	unmarshaller func([]byte) (T, error),
+) error {
+	// establish channel on given connection to recieve messages
+	channel, queue, err := DeclareAndBind(conn, exchange, queueName, key, simpleQueueType)
+	if err != nil {
+		return err
+	}
+	// queue messages to channel to consume them
 	m, err := channel.Consume(queue.Name, "", false, false, false, false, nil)
-	fmt.Println("Consume succeeded, starting goroutine...")
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	fmt.Println("consumer started")
 
 	go func() {
 		for message := range m {
-			var msg T
-			err = json.Unmarshal(message.Body, &msg)
+			msg, err := unmarshaller(message.Body)
 			if err != nil {
-				log.Fatal(err)
+				fmt.Printf("unexpected error: %v\n", err)
+				continue
 			}
 			acktype := handler(msg)
 			switch acktype {
 			case Ack:
 				err = message.Ack(false)
 				if err != nil {
-					log.Fatal(err)
+					fmt.Printf("unexpected error: %v\n", err)
+					continue
 				}
 				fmt.Println("Message processed successfully")
 			case NackRequeue:
 				err = message.Nack(false, true)
 				if err != nil {
-					log.Fatal(err)
+					fmt.Printf("unexpected error: %v\n", err)
+					continue
 				}
 				fmt.Println("Message not processed successfully, should be requeued")
 			case NackDiscard:
 				err = message.Nack(false, false)
 				if err != nil {
-					log.Fatal(err)
+					fmt.Printf("unexpected error: %v\n", err)
+					continue
 				}
 				fmt.Println("Message not processed successfully, should be discarded")
 			}

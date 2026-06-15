@@ -12,6 +12,18 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+func handlerSubscribeGameLog(gl routing.GameLog) func(gl routing.GameLog) pubsub.Acktype {
+	return func(gl routing.GameLog) pubsub.Acktype {
+		defer fmt.Print("> ")
+		err := gamelogic.WriteLog(gl)
+		if err != nil {
+			fmt.Printf("Unable to write log to disk: %s\n retrying...\n", err)
+			return pubsub.NackRequeue
+		}
+		return pubsub.Ack
+	}
+}
+
 func handlerPause(gs *gamelogic.GameState) func(ps routing.PlayingState) pubsub.Acktype {
 	return func(ps routing.PlayingState) pubsub.Acktype {
 		defer fmt.Print("> ")

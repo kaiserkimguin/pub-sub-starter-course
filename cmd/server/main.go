@@ -29,11 +29,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	logChannel, logQueue, err := pubsub.DeclareAndBind(newConntection, routing.ExchangePerilTopic, "game_logs", "game_logs.*", pubsub.Durable)
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("Successfully set up queue:\n %v, on channel\n: %v\n", logChannel, logQueue)
+	gobQueueName := "game_logs"
+	gobKey := "game_logs.*"
+	err = pubsub.SubscribeGob(newConntection, routing.ExchangePerilTopic, gobQueueName, gobKey, pubsub.Durable, handlerSubscribeGameLog())
 
 	defer newConntection.Close()
 
